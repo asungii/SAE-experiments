@@ -5,7 +5,7 @@ import os
 import torch
 import torch.distributed as dist
 from datasets import Dataset, load_dataset
-from simple_parsing import field, parse
+from simple_parsing import ArgumentParser, field, parse
 from transformers import (
     AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, PreTrainedModel,
 )
@@ -44,10 +44,14 @@ class RunConfig(TrainConfig):
     data_preprocessing_num_proc: int = field(
         default_factory=lambda: cpu_count() // 2,
     )
-    """Number of processes to use for preprocessing data"""
+    """Number of processes to use for preprocessing data."""
 
     attn_implementation: str = "sdpa"
     """Which implementation to use for attention in `transformers`. Pythia models require "eager"."""
+    
+    ## ADD
+    dataset_percentage: float = field(default=10.0, help="Percentage of the dataset to use")
+    """Percentage of the dataset to train on."""
 
 
 def load_artifacts(args: RunConfig, rank: int) -> tuple[PreTrainedModel, Dataset]:
@@ -71,9 +75,11 @@ def load_artifacts(args: RunConfig, rank: int) -> tuple[PreTrainedModel, Dataset
         token=args.hf_token,
     )
 
+    dataset_split = int(args.dataset_percentage)
     dataset = load_dataset(
         args.dataset,
-        split=args.split,
+        ## ADD
+        split=f'{args.split}[:{dataset_split}%]',
         # TODO: Maybe set this to False by default? But RPJ requires it.
         trust_remote_code=True,
     )
@@ -84,6 +90,13 @@ def load_artifacts(args: RunConfig, rank: int) -> tuple[PreTrainedModel, Dataset
 
 
 def run():
+    
+    ## ADD
+    parser = ArgumentParser()
+    parser.add_arguments(RunConfig, dest="config")
+    args = parser.parse_args()
+    config: RunConfig = args.config
+    
     local_rank = os.environ.get("LOCAL_RANK")
     ddp = local_rank is not None
     rank = int(local_rank) if ddp else 0
